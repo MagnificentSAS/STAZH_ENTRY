@@ -1,0 +1,1671 @@
+\documentclass[a4paper,12pt,titlepage,final]{article}
+\usepackage{float} % для позиционирования [H]
+\usepackage{array} % для улучшенного форматирования таблиц
+\usepackage[T1,T2A]{fontenc}     % форматы шрифтов
+\usepackage[utf8x]{inputenc}     % кодировка символов, используемая в данном файле
+\usepackage{mathtools}
+\usepackage[russian]{babel}      % пакет русификации
+\usepackage{tikz}                % для создания иллюстраций
+\usepackage{pgfplots}            % для вывода графиков функций
+\usepackage{geometry}		 % для настройки размера полей
+\usepackage{indentfirst}         % для отступа в первом абзаце секции
+\usepackage{multirow}            % для таблицы с результатами
+\usepackage{listings}
+\usepackage{url}
+\lstset{extendedchars=\true}
+% выбираем размер листа А4, все поля ставим по 3см
+\geometry{a4paper,left=20mm,top=20mm,bottom=20mm,right=20mm}
+
+\setcounter{secnumdepth}{0}      % отключаем нумерацию секций
+
+\usepgfplotslibrary{fillbetween} % для изображения областей на графиках
+
+\begin{document}
+\begin{titlepage}
+\centering\noindent
+{
+\begin{minipage}{0.1\textwidth}
+\includegraphics[width=\textwidth]{MSU.png}
+\end{minipage}
+\hfill
+\begin{minipage}{0.77\textwidth}
+\begin{center}
+\textbf{МОСКОВСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ}\par
+\textbf{имени М.В.Ломоносова}\par
+\end{center}
+\end{minipage}
+\hfill
+\begin{minipage}{0.1\textwidth}
+\includegraphics[width=\textwidth]{CMC.png}
+\end{minipage}
+}\par
+{
+\textbf{Факультет вычислительной математики и кибернетики}\par
+\nointerlineskip
+\noindent\makebox[\linewidth]{\rule{\textwidth}{0.4pt}}
+}
+\vfill
+{
+\Large{\textbf{Отчет по тестовому заданию}}\par
+\Large{\textbf{«Сравнительный анализ реализации и оптимизации нейронной сети в PyTorch и
+TensorFlow»}}\par
+}
+{
+\Large{\textbf{Отчет выполнил}}\par
+\Large{Броничев Александр Русланович}\par
+}
+\vfill
+{\small Москва\\ \the\year{}}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+\begin{center}
+\section{Введение}
+\subsection{Постановка задачи}
+\end{center}
+
+Провести анализ производительности простой модели с использованием различных инструментов. Исследуются показатели между фрэймворками PyTorch и TensorFlow. Так же изучается влияние графовых оптимизаций на скорость обучения. Обучается трехслойный перцептрон имеющий входной слой (по размеру признаков), скрытый слой (128 нейронов, ReLU) и выходной слой (1 нейрон). Для выполнения задачи нужно реализовать данную модель на обоих фрэймворках и исследовать скорость обучения, используемую память, точность обучения на некотором датасете.
+
+\begin{center}
+\item \subsection{Описание датасета}
+\end{center}
+
+Для решения задачи используется датасет \textbf{California Housing Dataset}. Этот датасет содержит информацию о недвижимости в Калифорнии (цены на жильё и характеристики районов) и часто используется для задач регрессии (прогнозирования стоимости домов). Источником является библиотека sklearn (в реализации на TF и PT из sklearn.datasets берется fetch\_california\_housing). Размер используемого датасета состовляет 20 640 записей, а каждая запись имеет 8 признаков. Целевой переменной является средняя стоимость дома в сотнях тысяч долларов. Каждая строка - это один район Калифорнии. Рассмотрим признаки датасета:
+\begin{itemize}
+    \item Средний доход жителей района (float, 0.5 - 15)
+    \item Средний возраст домов района (float, 1 - 52)
+    \item Среднее количество комнат в доме (float, 0.8 - 141)
+    \item Среднее количество спален в доме (float, 0.3 - 34)
+    \item Население района (float, 3 - 35 682)
+    \item Среднее количество жильцов в доме (float, 0.7 - 1 243)
+    \item Широта расположения района (float, 32.5 - 41.9)
+    \item Долгота расположения района (float, -124.3 - -114.3)
+    \item ЦЕЛЬ: Средняя стоимость дома (float, 0.15 - 5)
+\end{itemize}
+
+В датасете нет пропусков. Числовые признаки взяты небольшими, отчего удобны. Однако масштаб разный, поэтому была проведена нормализация.
+\newpage
+\begin{center}
+\section{Методы}
+\subsection{Описание архитектуры}
+\end{center}
+
+В задаче изучается обучение трехслойного перцептрона. \textbf{Перцептрон} - это простейший вид нейронных сетей, в основе которого лежит математическая модель восприятия информации мозгом, состоящая из сенсоров, ассоциативных и реагирующих элементов. Опишем принцип работы данной архитектуры:
+\begin{enumerate}
+    \item Первыми в работу включаются элементы-сенсоры.
+    \item Далее сенсоры передают сигналы ассоциативным элементам
+    \item Если сумма сигналов на ассоциативный элемент привысила какой-то порог, то этот элемент передает сигнал реагирующему элементу
+    \item Реагируюшие элементы получают сигнал с некоторым весом и в зависимости от некоторого порога дают ответ
+\end{enumerate}
+
+В выполняемой задаче рассматривается перцептрон, у которого:
+\begin{itemize}
+    \item Количество сенсоров зависит от количества признаков датасета (в случае California Housing Dataset 8) (входной слой)
+    \item 128 ассоциативных нейронов ReLU (скрытый слой)
+    \item 1 реагирующий элемент (выходной слой)
+\end{itemize}
+
+\begin{center}
+    \item \subsection{Примененные оптимизации}
+\end{center}
+
+В реализации на TensorFlow в качестве оптимизации используется декоратор @tf.function. С его помощью функция Python преобразуется в граф TensorFlow, что значительно ускоряет ее выполнение при работе с большими вычислениями, которые встречаются при обучении моделей. Рассмотрим основные параметры:
+\begin{itemize}
+    \item \textit{input\_signature} принимает ожидаемые размеры и типы данных входных тензоров, позволяет избежать лишних ретрассировок при изменении формы входных данных
+    \item \textit{autograph} автоматически конвертирует условия и циклы в граф, если равен True, иначе использует только операции TensorFlow, теряя часть оптимизации
+    \item \textit{jit\_compile} включает компиляцию XLA
+    \item \textit{reduce\_retracing} уменьшает количество ретрассировок при изменении входных данных
+    \item \textit{experimental\_relax\_shapes} разрешает более гибкое поведение при изменении форм входных данных
+    \item \textit{experimental\_follow\_type\_hints} автоматически приводит типы данных к указанным в аннотациях Python
+\end{itemize}
+
+В работе все параметры выставлены по умолчанию.\\
+
+В реализации на PyTorch используется оптимизация torch.compile. Эта функция ускоряет выполнение моделей за счет компиляции графов вычислений. Она автоматически оптимизирует код, уменьшая накладные расходы интерпретатора Python. Рассмотрим режимы torch.compile, которые включаются через mode= после параметра модели:
+\begin{itemize}
+    \item \textit{mode="default"} баланс между скоростью компиляции и производительностью
+    \item \textit{mode="reduce-overhead"} уменьшает накладные расходы интерпретатора Python
+    \item \textit{mode="max-autotune"} максимально агрессивная оптимизация, включая автоподбор лучших ядер для операций
+    \item \textit{mode="no-compile"} отключает компиляцию, оставляя оригинальный PyTorch-код
+\end{itemize}
+
+В работе используется режим max-autotune
+\newpage
+\begin{center}
+    \item \section{Результаты}
+\end{center}
+Испытания были проведены на двух различных устройствах (на одном на cpu, на втором на gpu). Было взято различное количество эпох (10, 20 и 30). Размер батча составляет 64. На обучение взято 80\% датасета, оставшиеся 20\% используются для проверки точности обучения.
+
+\begin{center}
+    \item \subsection{Таблицы сравнения производительности}
+\end{center}
+
+Приведу таблицы времени и потерь для испытаний TensorFLow на cpu
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE\\
+\hline
+1 & 11.69 & 0.5515 \\ [1.5ex]
+\hline
+2 & 12.62 & 0.4595 \\ [1.5ex]
+\hline
+3 & 11.98 & 0.4385 \\ [1.5ex]
+\hline
+4 & 11.17 & 0.4262 \\ [1.5ex]
+\hline
+5 & 11.33 & 0.4176 \\ [1.5ex]
+\hline
+6 & 10.91 & 0.4102 \\ [1.5ex]
+\hline
+7 & 11.06 & 0.4052 \\ [1.5ex]
+\hline
+8 & 12.33 & 0.4002 \\ [1.5ex]
+\hline
+9 & 9.57 & 0.3971 \\ [1.5ex]
+\hline
+10 & 9.46 & 0.3934 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения TensorFlow без оптимизации, 10 эпох}
+\label{table1}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE\\
+\hline
+1 & 12.85 & 0.5556 \\ [1.5ex]
+\hline
+2 & 9.72 & 0.4606 \\ [1.5ex]
+\hline
+3 & 9.83 & 0.4365 \\ [1.5ex]
+\hline
+4 & 10.48 & 0.4258 \\ [1.5ex]
+\hline
+5 & 9.48 & 0.4187 \\ [1.5ex]
+\hline
+6 & 10.40 & 0.4119 \\ [1.5ex]
+\hline
+7 & 13.37 & 0.4087 \\ [1.5ex]
+\hline
+8 & 12.26 & 0.4035 \\ [1.5ex]
+\hline
+9 & 13.98 & 0.4000 \\ [1.5ex]
+\hline
+10 & 14.25 & 0.3985 \\ [1.5ex]
+\hline
+11 & 12.38 & 0.3953 \\ [1.5ex]
+\hline
+12 & 10.77 & 0.3936 \\ [1.5ex]
+\hline
+13 & 10.26 & 0.3906 \\ [1.5ex]
+\hline
+14 & 10.63 & 0.3897 \\ [1.5ex]
+\hline
+15 & 10.28 & 0.3882 \\ [1.5ex]
+\hline
+16 & 11.14 & 0.3872 \\ [1.5ex]
+\hline
+17 & 10.37 & 0.3858 \\ [1.5ex]
+\hline
+18 & 9.73 & 0.3841 \\ [1.5ex]
+\hline
+19 & 9.67 & 0.3826 \\ [1.5ex]
+\hline
+20 & 8.99 & 0.3810 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения TensorFlow без оптимизации, 20 эпох}
+\label{table2}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE \\
+\hline
+1 & 9.60 & 0.5568 \\ [1.5ex]
+\hline
+2 & 8.91 & 0.4637 \\ [1.5ex]
+\hline
+3 & 8.69 & 0.4408 \\ [1.5ex]
+\hline
+4 & 9.03 & 0.4294 \\ [1.5ex]
+\hline
+5 & 9.45 & 0.4231 \\ [1.5ex]
+\hline
+6 & 9.36 & 0.4163 \\ [1.5ex]
+\hline
+7 & 9.57 & 0.4130 \\ [1.5ex]
+\hline
+8 & 10.48 & 0.4090 \\ [1.5ex]
+\hline
+9 & 10.46 & 0.4052 \\ [1.5ex]
+\hline
+10 & 9.88 & 0.4020 \\ [1.5ex]
+\hline
+11 & 11.88 & 0.4009 \\ [1.5ex]
+\hline
+12 & 10.50 & 0.3979 \\ [1.5ex]
+\hline
+13 & 11.05 & 0.3948 \\ [1.5ex]
+\hline
+14 & 9.00 & 0.3927 \\ [1.5ex]
+\hline
+15 & 9.69 & 0.3912 \\ [1.5ex]
+\hline
+16 & 9.14 & 0.3900 \\ [1.5ex]
+\hline
+17 & 9.49 & 0.3877 \\[1.5ex]
+\hline
+18 & 9.13 & 0.3872 \\ [1.5ex]
+\hline
+19 & 9.70 & 0.3845 \\ [1.5ex]
+\hline
+20 & 9.89 & 0.3847 \\ [1.5ex]
+\hline
+21 & 9.58 & 0.3848 \\ [1.5ex]
+\hline
+22 & 9.35 & 0.3830 \\ [1.5ex]
+\hline
+23 & 10.06 & 0.3809 \\ [1.5ex]
+\hline
+24 & 9.36 & 0.3800 \\ [1.5ex]
+\hline
+25 & 8.97 & 0.3802 \\ [1.5ex]
+\hline
+26 & 9.08 & 0.3788 \\ [1.5ex]
+\hline
+27 & 10.21 & 0.3776 \\ [1.5ex]
+\hline
+28 & 9.79 & 0.3764 \\ [1.5ex]
+\hline
+29 & 8.75 & 0.3748 \\ [1.5ex]
+\hline
+30 & 10.07 & 0.3746 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения TensorFlow без оптимизации, 30 эпох}
+\label{table3}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline 
+Номер эпохи & Время & Потери MAE\\ 
+\hline
+1 & 3.47 & 0.7682 \\ [1.5ex]
+\hline
+2 & 2.97 & 0.5069 \\ [1.5ex]
+\hline
+3 & 2.91 & 0.4617 \\ [1.5ex]
+\hline
+4 & 3.07 & 0.4481 \\ [1.5ex]
+\hline
+5 & 3.01 & 0.4313 \\ [1.5ex]
+\hline
+6 & 3.00 & 0.4334 \\ [1.5ex]
+\hline
+7 & 3.33 & 0.4299 \\ [1.5ex]
+\hline
+8 & 3.49 & 0.4245 \\ [1.5ex]
+\hline
+9 & 2.91 & 0.4201 \\ [1.5ex]
+\hline
+10 & 3.02 & 0.4163 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения TensorFlow с оптимизацией, 10 эпох}
+\label{table4}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline 
+Номер эпохи & Время & Потери MAE\\ 
+\hline
+1 & 2.67 & 0.5511 \\ [1.5ex]
+\hline
+2 & 3.36 & 0.4586 \\ [1.5ex]
+\hline
+3 & 3.71 & 0.4435 \\ [1.5ex]
+\hline
+4 & 4.05 & 0.4325 \\ [1.5ex]
+\hline
+5 & 3.10 & 0.4250 \\ [1.5ex]
+\hline
+6 & 3.67 & 0.4192 \\ [1.5ex]
+\hline
+7 & 3.38 & 0.4139 \\ [1.5ex]
+\hline
+8 & 3.00 & 0.4084 \\ [1.5ex]
+\hline
+9 & 3.13 & 0.4057 \\ [1.5ex]
+\hline
+10 & 3.08 & 0.4020 \\ [1.5ex]
+\hline
+11 & 2.55 & 0.3979 \\ [1.5ex]
+\hline
+12 & 2.69 & 0.3955 \\ [1.5ex]
+\hline
+13 & 2.33 & 0.3930 \\ [1.5ex]
+\hline
+14 & 2.74 & 0.3907 \\ [1.5ex]
+\hline
+15 & 2.48 & 0.3888 \\ [1.5ex]
+\hline
+16 & 2.93 & 0.3875 \\ [1.5ex]
+\hline
+17 & 3.03 & 0.3858 \\ [1.5ex]
+\hline
+18 & 2.42 & 0.3871 \\ [1.5ex]
+\hline
+19 & 2.93 & 0.3857 \\ [1.5ex]
+\hline
+20 & 2.70 & 0.3828 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения TensorFlow с оптимизацией, 20 эпох}
+\label{table5}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время & Потери MAE \\
+\hline
+1 & 2.97 & 0.5497 \\ [1.5ex]
+\hline
+2 & 2.72 & 0.4584 \\ [1.5ex]
+\hline
+3 & 2.36 & 0.4400 \\ [1.5ex]
+\hline
+4 & 2.44 & 0.4271 \\ [1.5ex]
+\hline
+5 & 2.31 & 0.4192 \\ [1.5ex]
+\hline
+6 & 2.51 & 0.4122 \\ [1.5ex]
+\hline
+7 & 2.33 & 0.4064 \\ [1.5ex]
+\hline
+8 & 2.32 & 0.4018 \\ [1.5ex]
+\hline
+9 & 2.34 & 0.3993 \\ [1.5ex]
+\hline
+10 & 2.29 & 0.3954 \\ [1.5ex]
+\hline
+11 & 2.41 & 0.3932 \\ [1.5ex]
+\hline
+12 & 2.69 & 0.3919 \\ [1.5ex]
+\hline
+13 & 2.40 & 0.3900 \\ [1.5ex]
+\hline
+14 & 2.37 & 0.3876 \\ [1.5ex]
+\hline
+15 & 2.35 & 0.3865 \\ [1.5ex]
+\hline
+16 & 2.35 & 0.3856 \\ [1.5ex]
+\hline
+17 & 2.33 & 0.3853 \\ [1.5ex]
+\hline
+18 & 2.34 & 0.3842 \\ [1.5ex]
+\hline
+19 & 2.32 & 0.3818 \\ [1.5ex]
+\hline
+20 & 2.35 & 0.3817 \\ [1.5ex]
+\hline
+21 & 2.33 & 0.3804 \\ [1.5ex]
+\hline
+22 & 2.35 & 0.3795 \\ [1.5ex]
+\hline
+23 & 2.34 & 0.3790 \\ [1.5ex]
+\hline
+24 & 2.33 & 0.3780 \\ [1.5ex]
+\hline
+25 & 2.32 & 0.3780 \\ [1.5ex]
+\hline
+26 & 2.33 & 0.3771 \\ [1.5ex]
+\hline
+27 & 2.33 & 0.3766 \\ [1.5ex]
+\hline
+28 & 2.32 & 0.3754 \\ [1.5ex]
+\hline
+29 & 2.33 & 0.3738 \\ [1.5ex]
+\hline
+30 & 2.48 & 0.3750 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения TensorFlow с оптимизацией, 30 эпох}
+\label{table6}
+\end{table}
+
+Приведу таблицы времени и потерь для испытаний PyTorch на cpu:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE \\
+\hline
+1 & 0.48 & 0.8085 \\ [1.5ex]
+\hline
+2 & 0.43 & 0.5329 \\ [1.5ex]
+\hline
+3 & 0.42 & 0.4800 \\ [1.5ex]
+\hline
+4 & 0.43 & 0.4616 \\ [1.5ex]
+\hline
+5 & 0.42 & 0.4514 \\ [1.5ex]
+\hline
+6 & 0.43 & 0.4465 \\ [1.5ex]
+\hline
+7 & 0.42 & 0.4403 \\ [1.5ex]
+\hline
+8 & 0.43 & 0.4355 \\ [1.5ex]
+\hline
+9 & 0.43 & 0.4306 \\ [1.5ex]
+\hline
+10 & 0.42 & 0.4251 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения PyTorch без оптимизации, 10 эпох}
+\label{table7}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE\\
+\hline
+1 & 0.49 & 0.7494 \\ [1.5ex]
+\hline
+2 & 0.46 & 0.5117 \\ [1.5ex]
+\hline
+3 & 0.42 & 0.4668 \\ [1.5ex]
+\hline
+4 & 0.46 & 0.4514 \\ [1.5ex]
+\hline
+5 & 0.42 & 0.4414 \\ [1.5ex]
+\hline
+6 & 0.42 & 0.4357 \\ [1.5ex]
+\hline
+7 & 0.43 & 0.4293 \\ [1.5ex]
+\hline
+8 & 0.43 & 0.4246 \\ [1.5ex]
+\hline
+9 & 0.43 & 0.4221 \\ [1.5ex]
+\hline
+10 & 0.46 & 0.4167 \\ [1.5ex]
+\hline
+11 & 0.44 & 0.4138 \\ [1.5ex]
+\hline
+12 & 0.44 & 0.4116 \\ [1.5ex]
+\hline
+13 & 0.44 & 0.4065 \\ [1.5ex]
+\hline
+14 & 0.44 & 0.4054 \\ [1.5ex]
+\hline
+15 & 0.44 & 0.4013 \\ [1.5ex]
+\hline
+16 & 0.45 & 0.4030 \\ [1.5ex]
+\hline
+17 & 0.45 & 0.3976 \\ [1.5ex]
+\hline
+18 & 0.45 & 0.3943 \\ [1.5ex]
+\hline
+19 & 0.45 & 0.3926 \\ [1.5ex]
+\hline
+20 & 0.45 & 0.3906 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения PyTorch без оптимизации, 20 эпох}
+\label{table8}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE \\
+\hline
+1 & 0.50 & 0.8783 \\ [1.5ex]
+\hline
+2 & 0.49 & 0.5589 \\ [1.5ex]
+\hline
+3 & 0.44 & 0.4899 \\ [1.5ex]
+\hline
+4 & 0.67 & 0.4652 \\ [1.5ex]
+\hline
+5 & 0.54 & 0.4529 \\ [1.5ex]
+\hline
+6 & 0.59 & 0.4456 \\ [1.5ex]
+\hline
+7 & 0.83 & 0.4406 \\ [1.5ex]
+\hline
+8 & 0.55 & 0.4354 \\ [1.5ex]
+\hline
+9 & 0.41 & 0.4304 \\ [1.5ex]
+\hline
+10 & 0.41 & 0.4263 \\ [1.5ex]
+\hline
+11 & 0.43 & 0.4226 \\ [1.5ex]
+\hline
+12 & 0.43 & 0.4169 \\ [1.5ex]
+\hline
+13 & 0.42 & 0.4150 \\ [1.5ex]
+\hline
+14 & 0.43 & 0.4115 \\ [1.5ex]
+\hline
+15 & 0.44 & 0.4092 \\ [1.5ex]
+\hline
+16 & 0.49 & 0.4053 \\ [1.5ex]
+\hline
+17 & 0.48 & 0.4038 \\ [1.5ex]
+\hline
+18 & 0.44 & 0.4018 \\ [1.5ex]
+\hline
+19 & 0.44 & 0.4062 \\ [1.5ex]
+\hline
+20 & 0.44 & 0.3976 \\ [1.5ex]
+\hline
+21 & 0.46 & 0.3957 \\ [1.5ex]
+\hline
+22 & 0.45 & 0.3954 \\ [1.5ex]
+\hline
+23 & 0.44 & 0.3930 \\ [1.5ex]
+\hline
+24 & 0.44 & 0.3911 \\ [1.5ex]
+\hline
+25 & 0.44 & 0.3904 \\ [1.5ex]
+\hline
+26 & 0.44 & 0.3884 \\ [1.5ex]
+\hline
+27 & 0.45 & 0.3900 \\ [1.5ex]
+\hline
+28 & 0.44 & 0.3864 \\ [1.5ex]
+\hline
+29 & 0.45 & 0.3893 \\ [1.5ex]
+\hline
+30 & 0.45 & 0.3849 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения PyTorch без оптимизации, 30 эпох}
+\label{table9}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE\\
+\hline
+1 & 0.66 & 0.7858 \\ [1.5ex]
+\hline
+2 & 0.57 & 0.5302 \\ [1.5ex]
+\hline
+3 & 0.51 & 0.4808 \\ [1.5ex]
+\hline
+4 & 0.76 & 0.4634 \\ [1.5ex]
+\hline
+5 & 0.65 & 0.4522 \\ [1.5ex]
+\hline
+6 & 0.67 & 0.4443 \\ [1.5ex]
+\hline
+7 & 0.53 & 0.4377 \\ [1.5ex]
+\hline
+8 & 0.56 & 0.4322 \\ [1.5ex]
+\hline
+9 & 0.59 & 0.4284 \\ [1.5ex]
+\hline
+10 & 0.56 & 0.4237 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения PyTorch с оптимизацией, 10 эпох}
+\label{table7}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE\\
+\hline
+1 & 0.49 & 0.8521 \\ [1.5ex]
+\hline
+2 & 0.54 & 0.5226 \\ [1.5ex]
+\hline
+3 & 0.62 & 0.4764 \\ [1.5ex]
+\hline
+4 & 0.58 & 0.4590 \\ [1.5ex]
+\hline
+5 & 0.56 & 0.4500 \\ [1.5ex]
+\hline
+6 & 0.84 & 0.4433 \\ [1.5ex]
+\hline
+7 & 0.65 & 0.4406 \\ [1.5ex]
+\hline
+8 & 0.55 & 0.4340 \\ [1.5ex]
+\hline
+9 & 0.75 & 0.4305 \\ [1.5ex]
+\hline
+10 & 0.63 & 0.4268 \\ [1.5ex]
+\hline
+11 & 0.56 & 0.4230 \\ [1.5ex]
+\hline
+12 & 0.55 & 0.4187 \\ [1.5ex]
+\hline
+13 & 0.67 & 0.4159 \\ [1.5ex]
+\hline
+14 & 0.56 & 0.4136 \\ [1.5ex]
+\hline
+15 & 0.55 & 0.4093 \\ [1.5ex]
+\hline
+16 & 0.54 & 0.4051 \\ [1.5ex]
+\hline
+17 & 0.56 & 0.4030 \\ [1.5ex]
+\hline
+18 & 0.56 & 0.4001 \\ [1.5ex]
+\hline
+19 & 0.64 & 0.3984 \\ [1.5ex]
+\hline
+20 & 0.57 & 0.3977 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения PyTorch с оптимизацией, 20 эпох}
+\label{table11}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE\\
+\hline
+1 & 0.51 & 0.8159 \\ [1.5ex]
+\hline
+2 & 0.49 & 0.5332 \\ [1.5ex]
+\hline
+3 & 0.50 & 0.4849 \\ [1.5ex]
+\hline
+4 & 0.49 & 0.4627 \\ [1.5ex]
+\hline
+5 & 0.62 & 0.4511 \\ [1.5ex]
+\hline
+6 & 0.60 & 0.4443 \\ [1.5ex]
+\hline
+7 & 0.50 & 0.4389 \\ [1.5ex]
+\hline
+8 & 0.51 & 0.4339 \\ [1.5ex]
+\hline
+9 & 0.50 & 0.4300 \\ [1.5ex]
+\hline
+10 & 0.51 & 0.4270 \\ [1.5ex]
+\hline
+11 & 0.52 & 0.4213 \\ [1.5ex]
+\hline
+12 & 0.52 & 0.4195 \\ [1.5ex]
+\hline
+13 & 0.52 & 0.4151 \\ [1.5ex]
+\hline
+14 & 0.73 & 0.4121 \\ [1.5ex]
+\hline
+15 & 0.52 & 0.4095 \\ [1.5ex]
+\hline
+16 & 0.53 & 0.4045 \\ [1.5ex]
+\hline
+17 & 0.53 & 0.4029 \\ [1.5ex]
+\hline
+18 & 0.53 & 0.4023 \\ [1.5ex]
+\hline
+19 & 0.55 & 0.4009 \\ [1.5ex]
+\hline
+20 & 0.54 & 0.3988 \\ [1.5ex]
+\hline
+21 & 0.55 & 0.3997 \\ [1.5ex]
+\hline
+22 & 0.55 & 0.3936 \\ [1.5ex]
+\hline
+23 & 0.54 & 0.3928 \\ [1.5ex]
+\hline
+24 & 0.54 & 0.3898 \\ [1.5ex]
+\hline
+25 & 0.55 & 0.3894 \\ [1.5ex]
+\hline
+26 & 0.55 & 0.3907 \\ [1.5ex]
+\hline
+27 & 0.66 & 0.3880 \\ [1.5ex]
+\hline
+28 & 0.58 & 0.3874 \\ [1.5ex]
+\hline
+29 & 0.58 & 0.3851 \\ [1.5ex]
+\hline
+30 & 0.57 & 0.3838 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения PyTorch с оптимизацией, 30 эпох}
+\label{table12}
+\end{table}
+
+Приведу таблицы времени и потерь для испытаний TensorFlow на gpu:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE \\
+\hline
+1 & 10.89 & 0.5655 \\ [1.5ex]
+\hline
+2 & 10.75 & 0.4639 \\ [1.5ex]
+\hline
+3 & 11.00 & 0.4411 \\ [1.5ex]
+\hline
+4 & 10.81 & 0.4262 \\ [1.5ex]
+\hline
+5 & 10.67 & 0.4200 \\ [1.5ex]
+\hline
+6 & 10.62 & 0.4120 \\ [1.5ex]
+\hline
+7 & 10.66 & 0.4074 \\ [1.5ex]
+\hline
+8 & 10.84 & 0.4034 \\ [1.5ex]
+\hline
+9 & 11.06 & 0.3991 \\ [1.5ex]
+\hline
+10 & 11.13 & 0.3966 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения TensorFlow без оптимизации, 10 эпох}
+\label{gputable1}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE \\
+\hline
+1 & 12.02 & 0.5532 \\ [1.5ex]
+\hline
+2 & 11.33 & 0.4601 \\ [1.5ex]
+\hline
+3 & 10.70 & 0.4356 \\ [1.5ex]
+\hline
+4 & 10.64 & 0.4222 \\ [1.5ex]
+\hline
+5 & 10.82 & 0.4152 \\ [1.5ex]
+\hline
+6 & 10.94 & 0.4091 \\ [1.5ex]
+\hline
+7 & 10.62 & 0.4035 \\ [1.5ex]
+\hline
+8 & 10.59 & 0.4012 \\ [1.5ex]
+\hline
+9 & 10.63 & 0.3957 \\ [1.5ex]
+\hline
+10 & 10.61 & 0.3945 \\ [1.5ex]
+\hline
+11 & 12.16 & 0.3921 \\ [1.5ex]
+\hline
+12 & 11.83 & 0.3908 \\ [1.5ex]
+\hline
+13 & 11.38 & 0.3887 \\ [1.5ex]
+\hline
+14 & 11.15 & 0.3861 \\ [1.5ex]
+\hline
+15 & 11.28 & 0.3867 \\ [1.5ex]
+\hline
+16 & 12.08 & 0.3848 \\ [1.5ex]
+\hline
+17 & 12.07 & 0.3842 \\ [1.5ex]
+\hline
+18 & 11.76 & 0.3836 \\ [1.5ex]
+\hline
+19 & 10.89 & 0.3820 \\ [1.5ex]
+\hline
+20 & 10.66 & 0.3825 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения TensorFlow без оптимизации, 20 эпох}
+\label{gputable2}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE \\
+\hline
+1 & 10.59 & 0.5563 \\ [1.5ex]
+\hline
+2 & 10.70 & 0.4650 \\ [1.5ex]
+\hline
+3 & 10.65 & 0.4434 \\ [1.5ex]
+\hline
+4 & 10.64 & 0.4300 \\ [1.5ex]
+\hline
+5 & 10.62 & 0.4211 \\ [1.5ex]
+\hline
+6 & 10.64 & 0.4144 \\ [1.5ex]
+\hline
+7 & 11.32 & 0.4097 \\ [1.5ex]
+\hline
+8 & 11.66 & 0.4041 \\ [1.5ex]
+\hline
+9 & 11.60 & 0.4008 \\ [1.5ex]
+\hline
+10 & 11.69 & 0.4021 \\ [1.5ex]
+\hline
+11 & 11.51 & 0.3982 \\ [1.5ex]
+\hline
+12 & 11.61 & 0.3924 \\ [1.5ex]
+\hline
+13 & 12.15 & 0.3903 \\ [1.5ex]
+\hline
+14 & 11.15 & 0.3887 \\ [1.5ex]
+\hline
+15 & 11.38 & 0.3868 \\ [1.5ex]
+\hline
+16 & 11.49 & 0.3863 \\ [1.5ex]
+\hline
+17 & 11.48 & 0.3851 \\ [1.5ex]
+\hline
+18 & 11.35 & 0.3839 \\ [1.5ex]
+\hline
+19 & 11.36 & 0.3831 \\ [1.5ex]
+\hline
+20 & 10.89 & 0.3826 \\ [1.5ex]
+\hline
+21 & 11.24 & 0.3805 \\ [1.5ex]
+\hline
+22 & 11.99 & 0.3799 \\ [1.5ex]
+\hline
+23 & 11.70 & 0.3800 \\ [1.5ex]
+\hline
+24 & 11.84 & 0.3775 \\ [1.5ex]
+\hline
+25 & 11.80 & 0.3783 \\ [1.5ex]
+\hline
+26 & 11.99 & 0.3794 \\ [1.5ex]
+\hline
+27 & 11.93 & 0.3773 \\ [1.5ex]
+\hline
+28 & 12.25 & 0.3755 \\ [1.5ex]
+\hline
+29 & 11.19 & 0.3757 \\ [1.5ex]
+\hline
+30 & 11.50 & 0.3742 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения TensorFlow без оптимизации, 30 эпох}
+\label{gputable3}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE \\
+\hline
+1 & 3.84 & 0.8204 \\ [1.5ex]
+\hline
+2 & 2.63 & 0.5125 \\ [1.5ex]
+\hline
+3 & 2.63 & 0.4660 \\ [1.5ex]
+\hline
+4 & 2.62 & 0.4514 \\ [1.5ex]
+\hline
+5 & 2.62 & 0.4406 \\ [1.5ex]
+\hline
+6 & 2.64 & 0.4348 \\ [1.5ex]
+\hline
+7 & 2.66 & 0.4299 \\ [1.5ex]
+\hline
+8 & 2.62 & 0.4260 \\ [1.5ex]
+\hline
+9 & 2.64 & 0.4211 \\ [1.5ex]
+\hline
+10 & 2.62 & 0.4174 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения TensorFlow с оптимизацией, 10 эпох}
+\label{gputable4}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE\\
+\hline
+1 & 2.62 & 0.5626 \\ [1.5ex]
+\hline
+2 & 2.64 & 0.4612 \\ [1.5ex]
+\hline
+3 & 2.66 & 0.4430 \\ [1.5ex]
+\hline
+4 & 2.65 & 0.4334 \\ [1.5ex]
+\hline
+5 & 2.64 & 0.4264 \\ [1.5ex]
+\hline
+6 & 2.69 & 0.4195 \\ [1.5ex]
+\hline
+7 & 2.64 & 0.4151 \\ [1.5ex]
+\hline
+8 & 2.65 & 0.4103 \\ [1.5ex]
+\hline
+9 & 2.65 & 0.4058 \\ [1.5ex]
+\hline
+10 & 2.65 & 0.4036 \\ [1.5ex]
+\hline
+11 & 2.65 & 0.4012 \\ [1.5ex]
+\hline
+12 & 2.64 & 0.3975 \\ [1.5ex]
+\hline
+13 & 2.64 & 0.3949 \\ [1.5ex]
+\hline
+14 & 2.67 & 0.3920 \\ [1.5ex]
+\hline
+15 & 2.67 & 0.3898 \\ [1.5ex]
+\hline
+16 & 2.67 & 0.3905 \\ [1.5ex]
+\hline
+17 & 2.68 & 0.3889 \\ [1.5ex]
+\hline
+18 & 2.66 & 0.3867 \\ [1.5ex]
+\hline
+19 & 2.66 & 0.3861 \\ [1.5ex]
+\hline
+20 & 2.67 & 0.3839 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения TensorFlow с оптимизацией, 20 эпох}
+\label{gputable5}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE\\
+\hline
+1 & 2.66 & 0.5584 \\ [1.5ex]
+\hline
+2 & 2.64 & 0.4571 \\ [1.5ex]
+\hline
+3 & 2.66 & 0.4359 \\ [1.5ex]
+\hline
+4 & 2.63 & 0.4254 \\ [1.5ex]
+\hline
+5 & 2.63 & 0.4185 \\ [1.5ex]
+\hline
+6 & 2.63 & 0.4121 \\ [1.5ex]
+\hline
+7 & 2.64 & 0.4093 \\ [1.5ex]
+\hline
+8 & 2.63 & 0.4048 \\ [1.5ex]
+\hline
+9 & 2.63 & 0.4012 \\ [1.5ex]
+\hline
+10 & 2.63 & 0.3969 \\ [1.5ex]
+\hline
+11 & 2.63 & 0.3950 \\ [1.5ex]
+\hline
+12 & 2.63 & 0.3929 \\ [1.5ex]
+\hline
+13 & 2.63 & 0.3913 \\ [1.5ex]
+\hline
+14 & 2.63 & 0.3892 \\ [1.5ex]
+\hline
+15 & 2.63 & 0.3880 \\ [1.5ex]
+\hline
+16 & 2.63 & 0.3861 \\ [1.5ex]
+\hline
+17 & 2.63 & 0.3855 \\ [1.5ex]
+\hline
+18 & 2.63 & 0.3838 \\ [1.5ex]
+\hline
+19 & 2.64 & 0.3844 \\ [1.5ex]
+\hline
+20 & 2.63 & 0.3808 \\ [1.5ex]
+\hline
+21 & 2.63 & 0.3807 \\ [1.5ex]
+\hline
+22 & 2.63 & 0.3822 \\ [1.5ex]
+\hline
+23 & 2.63 & 0.3796 \\ [1.5ex]
+\hline
+24 & 2.63 & 0.3803 \\ [1.5ex]
+\hline
+25 & 2.64 & 0.3804 \\ [1.5ex]
+\hline
+26 & 2.65 & 0.3781 \\ [1.5ex]
+\hline
+27 & 2.69 & 0.3768 \\ [1.5ex]
+\hline
+28 & 2.64 & 0.3772 \\ [1.5ex]
+\hline
+29 & 2.68 & 0.3760 \\ [1.5ex]
+\hline
+30 & 2.67 & 0.3758 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения TensorFlow с оптимизацией, 30 эпох}
+\label{gputable6}
+\end{table}
+
+Приведу таблицы времени и потерь для испытаний PyTorch на gpu:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE \\
+\hline
+1 & 2.01 & 0.8380 \\ [1.5ex]
+\hline
+2 & 1.01 & 0.5341 \\ [1.5ex]
+\hline
+3 & 1.00 & 0.4791 \\ [1.5ex]
+\hline
+4 & 1.04 & 0.4590 \\ [1.5ex]
+\hline
+5 & 0.98 & 0.4484 \\ [1.5ex]
+\hline
+6 & 1.03 & 0.4417 \\ [1.5ex]
+\hline
+7 & 1.03 & 0.4345 \\ [1.5ex]
+\hline
+8 & 1.03 & 0.4296 \\ [1.5ex]
+\hline
+9 & 1.03 & 0.4239 \\ [1.5ex]
+\hline
+10 & 1.07 & 0.4206 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения PyTorch без оптимизации, 10 эпох}
+\label{gputable7}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE \\
+\hline
+1 & 1.05 & 0.7924 \\ [1.5ex]
+\hline
+2 & 0.99 & 0.5135 \\ [1.5ex]
+\hline
+3 & 1.01 & 0.4724 \\ [1.5ex]
+\hline
+4 & 0.99 & 0.4586 \\ [1.5ex]
+\hline
+5 & 1.01 & 0.4486 \\ [1.5ex]
+\hline
+6 & 1.06 & 0.4413 \\ [1.5ex]
+\hline
+7 & 1.09 & 0.4384 \\ [1.5ex]
+\hline
+8 & 1.08 & 0.4312 \\ [1.5ex]
+\hline
+9 & 1.05 & 0.4271 \\ [1.5ex]
+\hline
+10 & 1.10 & 0.4224 \\ [1.5ex]
+\hline
+11 & 1.00 & 0.4168 \\ [1.5ex]
+\hline
+12 & 1.08 & 0.4141 \\ [1.5ex]
+\hline
+13 & 1.10 & 0.4114 \\ [1.5ex]
+\hline
+14 & 1.08 & 0.4067 \\ [1.5ex]
+\hline
+15 & 1.06 & 0.4027 \\ [1.5ex]
+\hline
+16 & 1.08 & 0.4002 \\ [1.5ex]
+\hline
+17 & 1.07 & 0.3992 \\ [1.5ex]
+\hline
+18 & 1.02 & 0.3966 \\ [1.5ex]
+\hline
+19 & 1.15 & 0.3923 \\ [1.5ex]
+\hline
+20 & 1.09 & 0.3920 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения PyTorch без оптимизации, 20 эпох}
+\label{gputable8}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{6.4cm}|p{3.2cm}|p{3.2cm}|}
+\hline
+Номер эпохи & Время (сек) & Потери MAE \\
+\hline
+1 & 1.09 & 0.7945 \\ [1.5ex]
+\hline
+2 & 1.14 & 0.5169 \\ [1.5ex]
+\hline
+3 & 1.09 & 0.4708 \\ [1.5ex]
+\hline
+4 & 0.90 & 0.4556 \\ [1.5ex]
+\hline
+5 & 0.96 & 0.4475 \\ [1.5ex]
+\hline
+6 & 0.95 & 0.4400 \\ [1.5ex]
+\hline
+7 & 0.92 & 0.4353 \\ [1.5ex]
+\hline
+8 & 0.94 & 0.4304 \\ [1.5ex]
+\hline
+9 & 0.92 & 0.4250 \\ [1.5ex]
+\hline
+10 & 0.93 & 0.4232 \\ [1.5ex]
+\hline
+11 & 0.94 & 0.4185 \\ [1.5ex]
+\hline
+12 & 0.90 & 0.4151 \\ [1.5ex]
+\hline
+13 & 0.94 & 0.4114 \\ [1.5ex]
+\hline
+14 & 0.93 & 0.4080 \\ [1.5ex]
+\hline
+15 & 0.91 & 0.4059 \\ [1.5ex]
+\hline
+16 & 0.95 & 0.4027 \\ [1.5ex]
+\hline
+17 & 0.91 & 0.4015 \\ [1.5ex]
+\hline
+18 & 0.96 & 0.3997 \\ [1.5ex]
+\hline
+19 & 0.92 & 0.3980 \\ [1.5ex]
+\hline
+20 & 0.90 & 0.3948 \\ [1.5ex]
+\hline
+21 & 0.95 & 0.3939 \\ [1.5ex]
+\hline
+22 & 0.93 & 0.3916 \\ [1.5ex]
+\hline
+23 & 0.94 & 0.3904 \\ [1.5ex]
+\hline
+24 & 0.93 & 0.3923 \\ [1.5ex]
+\hline
+25 & 0.91 & 0.3873 \\ [1.5ex]
+\hline
+26 & 0.94 & 0.3874 \\ [1.5ex]
+\hline
+27 & 0.99 & 0.3861 \\ [1.5ex]
+\hline
+28 & 0.97 & 0.3844 \\ [1.5ex]
+\hline
+29 & 0.97 & 0.3854 \\ [1.5ex]
+\hline
+30 & 0.93 & 0.3832 \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица обучения PyTorch без оптимизации, 30 эпох}
+\label{gputable9}
+\end{table}
+
+К сожалению на gpu не получилось запустить PyTorch с оптимизацией, поскольку видеокарта слишком старая и не поддерживает triton, необходимый для компиляции.
+
+
+
+
+
+
+\begin{center}
+    \item \subsection{Графики обучения}
+\end{center}
+
+Графики обучения на TensorFlow (cpu):
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cpuTF10.png}
+\caption{График обучения к таблице 1}
+\label{cputf10}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cpuTF20.png}
+\caption{График обучения к таблице 2}
+\label{cputf20}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cpuTF30.png}
+\caption{График обучения к таблице 3}
+\label{cputf30}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cpuTF10_opt.png}
+\caption{График обучения к таблице 4}
+\label{cputf10_opt}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cpuTF20_opt.png}
+\caption{График обучения к таблице 5}
+\label{cputf20_opt}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cpuTF30_opt.png}
+\caption{График обучения к таблице 6}
+\label{cputf30_opt}
+\end{figure}
+
+\newpage
+Графики обучения на PyTorch (cpu):
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cpuPT10.png}
+\caption{График обучения к таблице 7}
+\label{cpupt10}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cpuPT20.png}
+\caption{График обучения к таблице 8}
+\label{cpupt20}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cpuPT30.png}
+\caption{График обучения к таблице 9}
+\label{cpupt30}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cpuPT10_opt.png}
+\caption{График обучения к таблице 10}
+\label{cpupt10_opt}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cpuPT20_opt.png}
+\caption{График обучения к таблице 11}
+\label{cpupt20_opt}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cpuPT30_opt.png}
+\caption{График обучения к таблице 12}
+\label{cpupt30_opt}
+\end{figure}
+
+\newpage
+Графики обучения на TensorFlow (gpu):
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{gpuTF10.png}
+\caption{График обучения к таблице 13}
+\label{gputf10}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{gpuTF20.png}
+\caption{График обучения к таблице 14}
+\label{gputf20}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{gpuTF30.png}
+\caption{График обучения к таблице 15}
+\label{gputf30}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{gpuTF10_opt.png}
+\caption{График обучения к таблице 16}
+\label{gputf10_opt}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{gpuTF20_opt.png}
+\caption{График обучения к таблице 17}
+\label{gputf20_opt}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{gpuTF30_opt.png}
+\caption{График обучения к таблице 18}
+\label{gputf30_opt}
+\end{figure}
+
+\newpage
+Графики обучения на PyTorch (gpu):
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{gpuPT10.png}
+\caption{График обучения к таблице 19}
+\label{gpupt10}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{gpuPT20.png}
+\caption{График обучения к таблице 20}
+\label{gpupt20}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{gpuPT30.png}
+\caption{График обучения к таблице 21}
+\label{gpupt30}
+\end{figure}
+
+
+
+
+
+\begin{center}
+    \item \subsection{Анализ trade-off <<скорость-память>>}
+\end{center}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline 
+Количество эпох & Время & максимальная память\\ 
+\hline
+10 & 112.17 (11.21 на эпоху) & 0.66 MB \\ [1.5ex]
+\hline
+20 & 220.91 (11.04 на эпоху) & 0.26 MB \\ [1.5ex]
+\hline
+30 & 290.17 (9.67 на эпоху) & 0.21 MB \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица использования памяти и времени(TensorFlow без оптимизации cpu)}
+\label{table_mem1}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline 
+Количество эпох & Время & максимальная память\\ 
+\hline
+10 & 31.26 (3.12 на эпоху) & 2.93 MB \\ [1.5ex]
+\hline
+20 & 60.94 (3.04 на эпоху) & 0.47 MB \\ [1.5ex]
+\hline
+30 & 72.06 (2.40 на эпоху) & 0.19 MB \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица использования памяти и времени(TensorFlow c оптимизацией cpu)}
+\label{table_mem1}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline 
+Количество эпох & Время & максимальная память\\ 
+\hline
+10 & 4.30 (0.43 на эпоху) & 0.71 MB \\ [1.5ex]
+\hline
+20 & 8.88 (0.44 на эпоху) & 0.61 MB \\ [1.5ex]
+\hline
+30 & 14.34 (0.48 на эпоху) & 0.60 MB \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица использования памяти и времени(PyTorch без оптимизации cpu)}
+\label{table_mem1}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline 
+Количество эпох & Время & максимальная память\\ 
+\hline
+10 & 6.06 (0.61 на эпоху) & 1.34 MB \\ [1.5ex]
+\hline
+20 & 11.96 (0.60 на эпоху) & 1.00 MB \\ [1.5ex]
+\hline
+30 & 16.40 (0.55 на эпоху) & 0.70 MB \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица использования памяти и времени(PyTorch с оптимизацией cpu)}
+\label{table_mem1}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline 
+Количество эпох & Время & максимальная память\\ 
+\hline
+10 & 108.47 (10.84 на эпоху) & 0.24 MB \\ [1.5ex]
+\hline
+20 & 224.23 (11.21 на эпоху) & 0.25 MB \\ [1.5ex]
+\hline
+30 & 341.99 (11.40 на эпоху) & 0.24 MB \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица использования памяти и времени(TensorFlow без оптимизации gpu)}
+\label{table_mem1}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline 
+Количество эпох & Время & максимальная память\\ 
+\hline
+10 & 27.57 (2.75 на эпоху) & 1.01 MB \\ [1.5ex]
+\hline
+20 & 53.17 (2.65 на эпоху) & 0.70 MB \\ [1.5ex]
+\hline
+30 & 79.26 (2.64 на эпоху) & 0.23 MB \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица использования памяти и времени(TensorFlow c оптимизацией gpu)}
+\label{table_mem1}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{5.4cm}|p{3.8cm}|p{3.8cm}|}
+\hline 
+Количество эпох & Время & максимальная память\\ 
+\hline
+10 & 11.22 (1.12 на эпоху) & 0.66 MB \\ [1.5ex]
+\hline
+20 & 21.17 (1.06 на эпоху) & 0.67 \\ [1.5ex]
+\hline
+30 & 28.55 (0.95 на эпоху)& 0.67 MB \\ [1.5ex]
+\hline
+\end{tabular}
+\caption{Таблица использования памяти и времени(PyTorch без оптимизации gpu)}
+\label{table_mem1}
+\end{table}
+
+
+
+\newpage
+\begin{center}
+    \item \subsection{Анализ точности обучения}
+\end{center}
+\textbf{Исследования CPU:}\\
+За 10 эпох обучения на TensorFlow с оптимизацией на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3601
+    \item MAE: 0.4175
+\end{itemize}
+За 20 эпох обучения на TensorFlow с оптимизацией на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3407
+    \item MAE: 0.3952
+\end{itemize}
+За 30 эпох обучения на TensorFlow с оптимизацией на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3122
+    \item MAE: 0.3839
+\end{itemize}
+За 10 эпох обучения на TensorFlow без оптимизации на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3382
+    \item MAE: 0.4050
+\end{itemize}
+За 20 эпох обучения на TensorFlow без оптимизации на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3191
+    \item MAE: 0.3935
+\end{itemize}
+За 30 эпох обучения на TensorFlow без оптимизации на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3080
+    \item MAE: 0.3812
+\end{itemize}
+За 10 эпох обучения на PyTorch с оптимизацией на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3649
+    \item MAE: 0.4289
+\end{itemize}
+За 20 эпох обучения на PyTorch с оптимизацией на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3466
+    \item MAE: 0.4043
+\end{itemize}
+За 30 эпох обучения на PyTorch с оптимизацией на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3262
+    \item MAE: 0.3881
+\end{itemize}
+За 10 эпох обучения на PyTorch без оптимизации на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3649
+    \item MAE: 0.4282
+\end{itemize}
+За 20 эпох обучения на PyTorch без оптимизации на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3252
+    \item MAE: 0.3939
+\end{itemize}
+За 30 эпох обучения на PyTorch без оптимизации на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3173
+    \item MAE: 0.3900
+\end{itemize}
+\textbf{Исследования GPU:}
+\\За 10 эпох обучения на TensorFlow c оптимизацией на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3564
+    \item MAE: 0.4195
+\end{itemize}
+За 20 эпох обучения на TensorFlow c оптимизацией на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3233
+    \item MAE: 0.3932
+\end{itemize}
+За 30 эпох обучения на TensorFlow c оптимизацией на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3084
+    \item MAE: 0.3789
+\end{itemize}
+За 10 эпох обучения на TensorFlow без оптимизации на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3360
+    \item MAE: 0.4057
+\end{itemize}
+За 20 эпох обучения на TensorFlow без оптимизации на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3324
+    \item MAE: 0.3938
+\end{itemize}
+За 30 эпох обучения на TensorFlow без оптимизации на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3141
+    \item MAE: 0.3804
+\end{itemize}
+За 10 эпох обучения на PyTorch без оптимизации на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3637
+    \item MAE: 0.4260
+\end{itemize}
+За 20 эпох обучения на PyTorch без оптимизации на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3344
+    \item MAE: 0.3994
+\end{itemize}
+За 30 эпох обучения на PyTorch без оптимизации на тестовой выборке:
+\begin{itemize}
+    \item MSE: 0.3167
+    \item MAE: 0.3846
+\end{itemize}
+\newpage
+
+\begin{center}
+\section{Выводы}
+\subsection{Сравнение API фрэймворков}
+\end{center}
+
+Начну с простоты использования. Для себя я определенно выделю в простоте TensorFlow, так как существует автоматическое обучение. Однако для оптимизации с помощью @tf.function нужно было писать обучение вручную, что делает удобтво и простоту примерно на одном уровне с PyTorch. Реализация перцептрона на обоих фрэймворках достаточно проста.\\
+
+Расскажу так же о выводах сделанных после эксперименатов. На небольшой и простой модели трехслойного перцептрона PyTorch показал себя заметно лучше по скорости обучения, нежели TensorFlow (примерно 0.5 секунд на эпоху у PyTorch против 10 без @tf.funcion и 2-3 с указанной оптимизацией у TensorFlow), причем, как с оптимизацией, так и без, как на cpu, так и на gpu. В точности при тестах на выборке из датасета, не учавствовавшей в обучении результат получен неоднозначный. Выделить очевидного лидера в качестве обучения реализованной модели я не смог.\\
+
+Рассмотрим полученную информацию по оптимизациям. @tf.function дает прирост скорости примерно в 5 раз при обучении взятой модели. Точность обучения при проведении эксперементов TensorFlow отличалась, но показатели потерь MSE и MAE были примерно одинаковы, что говорит либо о малом влиянии на точность, либо о его отсутствии. В это время оптимизация torch.compile показала менее очевидный результат. Проверка была сделана только на cpu, где реализация с оптимизацией показала результат хуже, чем реализация без. Отличие было в примерно 0.1-0.15 секунд, что составляет примерно 20\% разницы.\\
+
+Различия в реализациях на cpu и gpu была не в пользу последнего устройства как на TensorFlow, так и на PyTorch. Связываю это с простотой модели и маленьким размером батча, отчего видеокарта нагружается не целиком при сохранении накладных расходов при передаче данных на графический процессор.\\
+
+В большинстве случаев PyTorch сильнее нагружал память. Нагрузка на память была незначительной, поскольку выбранное количество батчей не велико (64).\\
+
+Таким образом, я могу порекомендовать PyTorch для обучения простых моделей, не требующих большого количества сложных вычислений из-за очень большого преимущества в скорости, а так же советую обучать простые модели на cpu в связи с образованием накладных расходов при обучении на gpu.\\
+
+\begin{center}
+    \item \subsection{Рекомендации по использованию оптимизаций}
+\end{center}
+
+При проведении эксперементов выяснил, что для простых моделей на TensorFlow использование @tf.function обязательно. Преобразование действий в граф и сохранение последовательноти действий выгодно увеличивает скорость обучения. Предполагаю, что на более сложных моделях выигрыш может быть меньше в связи с усложнением графа, но считаю, что он все еще будет.\\
+
+С оптимизацией torch.compile все не так однозначно. Сравнение было только на cpu, поэтому буду писать именно о нем. torch.compile анализирует граф, использует некоторые компиляции, хорошие для больших моделей, однако исследуемая модель мала и нужные оптимизации не только тормозят выполнение из-за самой компиляции, но и выбираемые оптимизации тормозят обучение модели, что было выявленно на всех испытаних (10, 20, 30 эпох). Для малых моделей рекомендую не использовать torch.compile при обучении на cpu.\\
+
+Еще одна рекомендация: перед началом обучения пропустить модель сквозь датасет без обучения при испоьзовании PyTorch. "Разогрев" таким образом модель дальнейшее обучение будет точнее и быстрее. Первые эпохи обучения без выполнения рекомендации будут очень неточны и медленны.
+
+\begin{center}
+    \item \subsection{Ограничения методов}
+\end{center}
+
+Для обучения трехслойного перцептрона написание кода на PyTorch выглядит избыточным, поскольку требуется прописания многих вещей (например функцию обучения и функцию оценки) вручную, в то время как в TensorFlow присутствует model.fit(), служащий для обучения модели без излишнего кода.\\
+
+TensorFlow кажется избыточным решением для простой модели из-за времени обучения, которое должно быть меньше у моделей сложнее.\\
+
+По рзультатам исследований незначительна, но заметна большая скорость обучения простых моделей на cpu.\\
+
+\end{document}
